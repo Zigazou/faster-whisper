@@ -2,24 +2,41 @@
 
 from __future__ import annotations
 
-import logging
+from logging import getLogger
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import numpy as np
+import numpy.typing as npt
 from faster_whisper import WhisperModel
 from faster_whisper.audio import decode_audio
 
 from .chunking import chunk_windows
 from .models import SegmentResult, TranscriptionResult, WordResult
 
+# The sample rate used by Faster Whisper is 16 kHz, which is higher than the 16
+# kHz used by pyannote. Decoding the audio at the Faster Whisper sample rate
+# ensures that the waveform passed to the model is consistent with its training
+# and avoids unnecessary resampling.
 SAMPLE_RATE = 16_000
-LOGGER = logging.getLogger(__name__)
+
+LOGGER = getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class TranscriptionConfig:
-    """Options that control model inference and audio chunking."""
+    """Options that control model inference and audio chunking.
+
+    Attributes:
+        model_name: Faster Whisper model identifier or local path.
+        chunk_duration: Maximum length of each non-overlapping chunk in seconds.
+        overlap: Number of seconds added to both sides of each chunk.
+        language: Optional language code used to force recognition.
+        beam_size: Beam search width used by the decoder.
+        vad_filter: Whether the Silero VAD filter is enabled.
+        word_timestamps: Whether per-word timestamps should be included.
+    """
 
     model_name: str = "large-v3"
     chunk_duration: float = 300.0
@@ -30,17 +47,44 @@ class TranscriptionConfig:
     word_timestamps: bool = False
 
     def validate(self) -> None:
+        """Validate the configuration before a transcription run.
+
+        Returns:
+            None.
+
+        Raises:
+            ValueError: If ``chunk_duration`` is not positive.
+            ValueError: If ``overlap`` is negative.
+            ValueError: If ``overlap`` is not shorter than the chunk duration.
+            ValueError: If ``beam_size`` is less than one.
+        """
         if self.chunk_duration <= 0:
             raise ValueError("chunk duration must be greater than zero")
+
         if self.overlap < 0:
             raise ValueError("overlap cannot be negative")
+
         if self.overlap >= self.chunk_duration:
             raise ValueError("overlap must be shorter than chunk duration")
+
         if self.beam_size < 1:
             raise ValueError("beam size must be at least 1")
 
 
 def _shift_segment(segment: Any, offset: float) -> SegmentResult:
+    """Shift a segment and its word timings by a time offset.
+
+    Args:
+        segment: Faster Whisper segment-like object containing ``start``,
+            ``end``, ``text``, and ``words`` fields.
+        offset: Time offset in seconds to apply to the segment and its words.
+
+    Returns:
+        A new ``SegmentResult`` whose timing values are shifted by ``offset``.
+
+    Raises:
+        TypeError: If the segment does not expose the expected attributes.
+    """
     words = [
         WordResult(
             start=max(0.0, float(word.start) + offset),
@@ -50,6 +94,7 @@ def _shift_segment(segment: Any, offset: float) -> SegmentResult:
         )
         for word in (segment.words or [])
     ]
+
     return SegmentResult(
         start=max(0.0, float(segment.start) + offset),
         end=max(0.0, float(segment.end) + offset),
@@ -63,11 +108,31 @@ def transcribe_audio(
     audio_path: Path,
     config: TranscriptionConfig,
 ) -> TranscriptionResult:
-    """Decode and transcribe one audio file in overlapping chunks."""
+    """Decode and transcribe one audio file in overlapping chunks.
+
+    Args:
+        model: Preloaded Faster Whisper model used for inference.
+        audio_path: Path to the source audio file.
+        config: Transcription configuration controlling chunking and decoding.
+
+    Returns:
+        A ``TranscriptionResult`` containing the detected language, confidence,
+        duration, model name, and the filtered segments.
+
+    Raises:
+        ValueError: If the decoded audio stream is empty.
+        ValueError: If the supplied configuration is invalid.
+    """
     config.validate()
     LOGGER.info("Decoding %s", audio_path)
-    audio = decode_audio(str(audio_path), sampling_rate=SAMPLE_RATE)
+
+    # split_stereo is never requested, so the result is always a single array.
+    audio = cast(
+        npt.NDArray[np.float32],
+        decode_audio(str(audio_path), sampling_rate=SAMPLE_RATE),
+    )
     total_samples = len(audio)
+
     if total_samples == 0:
         raise ValueError("the audio stream is empty")
 
@@ -79,6 +144,7 @@ def transcribe_audio(
             round(config.overlap * SAMPLE_RATE),
         )
     )
+
     resolved_language = config.language
     language_probability = 1.0 if config.language else 0.0
     results: list[SegmentResult] = []
@@ -93,6 +159,7 @@ def transcribe_audio(
             window_start / SAMPLE_RATE,
             window_end / SAMPLE_RATE,
         )
+
         segments, info = model.transcribe(
             audio[window_start:window_end],
             language=resolved_language,
@@ -119,6 +186,7 @@ def transcribe_audio(
                 midpoint < core_end_seconds
                 or (is_last and midpoint <= core_end_seconds)
             )
+
             if belongs_to_core and shifted.text:
                 shifted.start = min(shifted.start, duration)
                 shifted.end = min(shifted.end, duration)

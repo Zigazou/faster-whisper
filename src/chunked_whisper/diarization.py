@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+from logging import getLogger
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,14 +11,28 @@ from faster_whisper.audio import decode_audio
 
 from .models import SegmentResult
 
+# The default diarization model is a community-contributed model that is
+# smaller and faster than the official pyannote/speaker-diarization model.
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+
+# The sample rate used by pyannote is 16 kHz, which is lower than the
+# 16 kHz used by Faster Whisper. Decoding the audio at the diarization sample
+# rate ensures that the waveform passed to pyannote is consistent with its
+# training and avoids unnecessary resampling.
 DIARIZATION_SAMPLE_RATE = 16_000
-LOGGER = logging.getLogger(__name__)
+
+LOGGER = getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class SpeakerTurn:
-    """A time interval attributed to one anonymous speaker."""
+    """A time interval attributed to one anonymous speaker.
+
+    Attributes:
+        start: Turn start time in seconds.
+        end: Turn end time in seconds.
+        speaker: Anonymous speaker label for the turn.
+    """
 
     start: float
     end: float
@@ -30,7 +44,20 @@ def load_diarization_pipeline(
     token: str | None = None,
     device: str = "cpu",
 ) -> Any:
-    """Load a pyannote speaker diarization pipeline on the requested device."""
+    """Load a pyannote speaker diarization pipeline on the requested device.
+
+    Args:
+        model_name: Hugging Face model identifier for the diarization pipeline.
+        token: Optional Hugging Face access token for gated models.
+        device: Target PyTorch device name, such as ``"cpu"`` or ``"cuda"``.
+
+    Returns:
+        A loaded pyannote pipeline instance ready to process audio.
+
+    Raises:
+        RuntimeError: If the diarization extra is not installed.
+        RuntimeError: If the pipeline could not be loaded.
+    """
     try:
         import torch
         from pyannote.audio import Pipeline
@@ -46,9 +73,12 @@ def load_diarization_pipeline(
             f"could not load diarization model {model_name!r}; verify model "
             "access and your Hugging Face token"
         )
+
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
+
     pipeline.to(torch.device(device))
+
     return pipeline
 
 
@@ -60,7 +90,21 @@ def diarize_audio(
     min_speakers: int | None = None,
     max_speakers: int | None = None,
 ) -> list[SpeakerTurn]:
-    """Run pyannote and return chronologically ordered anonymous turns."""
+    """Run pyannote and return chronologically ordered anonymous turns.
+
+    Args:
+        pipeline: A loaded pyannote diarization pipeline.
+        audio_path: Path to the input audio file.
+        num_speakers: Optional exact number of speakers to infer.
+        min_speakers: Optional minimum number of speakers to infer.
+        max_speakers: Optional maximum number of speakers to infer.
+
+    Returns:
+        A list of ``SpeakerTurn`` objects sorted by time.
+
+    Raises:
+        ValueError: If the decoded audio stream is empty.
+    """
     import torch
 
     options = {
@@ -72,15 +116,20 @@ def diarize_audio(
         )
         if value is not None
     }
+
     LOGGER.info("Diarizing %s", audio_path)
+
     # Passing a compressed file path makes pyannote seek and decode each crop
     # independently. Some MP3 files cannot be sought with sample-level accuracy,
     # which can make a crop shorter than pyannote expects. Decode the complete
     # stream once so every crop operates on the same sample-exact waveform.
     audio = decode_audio(str(audio_path), sampling_rate=DIARIZATION_SAMPLE_RATE)
+
     if len(audio) == 0:
         raise ValueError("the audio stream is empty")
+
     waveform = torch.from_numpy(audio).unsqueeze(0)
+
     output = pipeline(
         {
             "waveform": waveform,
@@ -89,12 +138,14 @@ def diarize_audio(
         },
         **options,
     )
+
     annotation = getattr(output, "exclusive_speaker_diarization", output)
 
     raw_turns = [
         (float(turn.start), float(turn.end), str(speaker))
         for turn, _, speaker in annotation.itertracks(yield_label=True)
     ]
+
     raw_turns.sort(key=lambda item: (item[0], item[1]))
 
     # Never expose model-specific identities: labels only distinguish speakers
@@ -104,31 +155,57 @@ def diarize_audio(
     for start, end, original_label in raw_turns:
         label = labels.setdefault(original_label, f"SPEAKER_{len(labels):02d}")
         turns.append(SpeakerTurn(start=start, end=end, speaker=label))
+
     return turns
 
 
 def _speaker_for_interval(
-    start: float, end: float, turns: list[SpeakerTurn]
+    start: float,
+    end: float,
+    turns: list[SpeakerTurn]
 ) -> str | None:
-    """Return the speaker with the greatest overlap with an interval."""
+    """Return the speaker with the greatest overlap with a time interval.
+
+    Args:
+        start: Interval start in seconds.
+        end: Interval end in seconds.
+        turns: Speaker turns sorted by time.
+
+    Returns:
+        The speaker label with the largest overlap, or ``None`` if no turn covers
+        the interval.
+    """
     best_speaker: str | None = None
     best_overlap = 0.0
     for turn in turns:
         if turn.start >= end:
             break
+
         if turn.end <= start:
             continue
+
         overlap = min(end, turn.end) - max(start, turn.start)
         if overlap > best_overlap:
             best_overlap = overlap
             best_speaker = turn.speaker
+
     return best_speaker
 
 
 def assign_speakers(
-    segments: list[SegmentResult], turns: list[SpeakerTurn]
+    segments: list[SegmentResult],
+    turns: list[SpeakerTurn]
 ) -> list[SegmentResult]:
-    """Assign speakers to transcript words and split at speaker changes."""
+    """Assign speakers to transcript words and split segments at speaker changes.
+
+    Args:
+        segments: Transcribed segments whose word timings are used for alignment.
+        turns: Speaker diarization results used to assign labels.
+
+    Returns:
+        A list of segments regrouped by speaker, with each segment carrying a
+        ``speaker`` value when a speaker can be determined.
+    """
     aligned: list[SegmentResult] = []
     for segment in segments:
         if not segment.words:
@@ -138,15 +215,21 @@ def assign_speakers(
                     end=segment.end,
                     text=segment.text,
                     words=[],
-                    speaker=_speaker_for_interval(segment.start, segment.end, turns),
+                    speaker=_speaker_for_interval(
+                        segment.start,
+                        segment.end,
+                        turns
+                    )
                 )
             )
+
             continue
 
         group_words = []
         group_speaker: str | None = None
         for word in segment.words:
             speaker = _speaker_for_interval(word.start, word.end, turns)
+
             if group_words and speaker != group_speaker:
                 aligned.append(
                     SegmentResult(
@@ -158,8 +241,10 @@ def assign_speakers(
                     )
                 )
                 group_words = []
+
             if not group_words:
                 group_speaker = speaker
+
             group_words.append(word)
 
         if group_words:
@@ -172,4 +257,5 @@ def assign_speakers(
                     speaker=group_speaker,
                 )
             )
+
     return [segment for segment in aligned if segment.text]

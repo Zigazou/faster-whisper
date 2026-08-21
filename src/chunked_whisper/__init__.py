@@ -1,4 +1,5 @@
-"""Chunked audio transcription built on Faster Whisper."""
+"""Public package exports for chunked audio transcription with Faster
+Whisper."""
 
 from .chunking import chunk_windows
 from .diarization import SpeakerTurn, assign_speakers, diarize_audio
