@@ -13,6 +13,19 @@ from .models import SegmentResult, TranscriptionResult
 OutputFormat = Literal["all", "txt", "srt", "json"]
 
 
+def _speaker_prefix(segment: SegmentResult) -> str:
+    return f"[{segment.speaker}] " if segment.speaker else ""
+
+
+def render_txt(segments: Sequence[SegmentResult]) -> str:
+    """Render plain text, adding one line per diarized speaker turn."""
+    if any(segment.speaker for segment in segments):
+        lines = [f"{_speaker_prefix(segment)}{segment.text}" for segment in segments]
+        return "\n".join(lines) + ("\n" if lines else "")
+    text = " ".join(segment.text.strip() for segment in segments).strip()
+    return text + ("\n" if text else "")
+
+
 def format_timestamp(seconds: float, decimal_marker: str = ",") -> str:
     """Format seconds as an SRT-compatible timestamp."""
     milliseconds = max(0, round(seconds * 1000))
@@ -30,7 +43,8 @@ def render_srt(segments: Sequence[SegmentResult]) -> str:
     blocks = [
         (
             f"{index}\n{format_timestamp(segment.start)} --> "
-            f"{format_timestamp(segment.end)}\n{segment.text}"
+            f"{format_timestamp(segment.end)}\n"
+            f"{_speaker_prefix(segment)}{segment.text}"
         )
         for index, segment in enumerate(segments, start=1)
     ]
@@ -59,7 +73,7 @@ def write_outputs(
                 f"refusing to overwrite the input file with output: {output_path}"
             )
         if selected_format == "txt":
-            content = result.text + ("\n" if result.text else "")
+            content = render_txt(result.segments)
         elif selected_format == "srt":
             content = render_srt(result.segments)
         else:
@@ -70,4 +84,3 @@ def write_outputs(
         written.append(output_path)
 
     return written
-

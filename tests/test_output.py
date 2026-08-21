@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 
 from chunked_whisper.models import SegmentResult, TranscriptionResult
-from chunked_whisper.output import format_timestamp, render_srt, write_outputs
+from chunked_whisper.output import (
+    format_timestamp,
+    render_srt,
+    render_txt,
+    write_outputs,
+)
 
 
 class OutputTests(unittest.TestCase):
@@ -27,6 +32,18 @@ class OutputTests(unittest.TestCase):
             "1\n00:00:00,000 --> 00:00:01,250\nHello world.\n",
         )
 
+    def test_diarized_text_and_srt_include_speaker(self):
+        segments = [
+            SegmentResult(0.0, 1.0, "Hello.", speaker="SPEAKER_00"),
+            SegmentResult(1.0, 2.0, "Hi.", speaker="SPEAKER_01"),
+        ]
+
+        self.assertEqual(
+            render_txt(segments),
+            "[SPEAKER_00] Hello.\n[SPEAKER_01] Hi.\n",
+        )
+        self.assertIn("\n[SPEAKER_01] Hi.\n", render_srt(segments))
+
     def test_writes_all_formats(self):
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory)
@@ -45,6 +62,7 @@ class OutputTests(unittest.TestCase):
                 (output_dir / "recording.json").read_text(encoding="utf-8")
             )
             self.assertEqual(payload["text"], "Hello world.")
+            self.assertIsNone(payload["segments"][0]["speaker"])
 
     def test_refuses_to_overwrite_input(self):
         with tempfile.TemporaryDirectory() as directory:

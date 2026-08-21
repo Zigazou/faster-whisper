@@ -5,11 +5,18 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 from faster_whisper import WhisperModel
 
+from .diarization import (
+    DEFAULT_DIARIZATION_MODEL,
+    assign_speakers,
+    diarize_audio,
+    load_diarization_pipeline,
+)
 from .output import OutputFormat, write_outputs
 from .transcription import TranscriptionConfig, transcribe_audio
 
@@ -27,6 +34,13 @@ def non_negative_float(value: str) -> float:
     number = float(value)
     if number < 0:
         raise argparse.ArgumentTypeError("cannot be negative")
+    return number
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
     return number
 
 
@@ -82,6 +96,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="include word timing in JSON",
     )
     parser.add_argument(
+        "--diarize",
+        action="store_true",
+        help="differentiate speakers with anonymous labels using pyannote.audio",
+    )
+    parser.add_argument(
+        "--diarization-model",
+        default=DEFAULT_DIARIZATION_MODEL,
+        help=f"pyannote pipeline (default: {DEFAULT_DIARIZATION_MODEL})",
+    )
+    parser.add_argument(
+        "--diarization-device",
+        default="cpu",
+        help="PyTorch device for diarization (default: cpu)",
+    )
+    parser.add_argument(
+        "--hf-token",
+        help="Hugging Face token for the gated diarization model",
+    )
+    speaker_group = parser.add_argument_group("speaker count hints")
+    speaker_group.add_argument("--num-speakers", type=positive_int)
+    speaker_group.add_argument("--min-speakers", type=positive_int)
+    speaker_group.add_argument("--max-speakers", type=positive_int)
+    parser.add_argument(
         "--output-dir",
         type=Path,
         help="output directory (default: beside each input)",
@@ -114,10 +151,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         vad_filter=not args.no_vad,
         word_timestamps=args.word_timestamps,
     )
+    if args.diarize:
+        config = replace(config, word_timestamps=True)
     try:
         config.validate()
+        if args.num_speakers is not None and (
+            args.min_speakers is not None or args.max_speakers is not None
+        ):
+            raise ValueError(
+                "--num-speakers cannot be combined with speaker count bounds"
+            )
+        if (
+            args.min_speakers is not None
+            and args.max_speakers is not None
+            and args.min_speakers > args.max_speakers
+        ):
+            raise ValueError("--min-speakers cannot exceed --max-speakers")
+        if not args.diarize and any(
+            value is not None
+            for value in (args.num_speakers, args.min_speakers, args.max_speakers)
+        ):
+            raise ValueError("speaker count hints require --diarize")
     except ValueError as error:
-        LOGGER.error("Invalid transcription options: %s", error)
+        LOGGER.error("Invalid options: %s", error)
         return 2
 
     LOGGER.info(
@@ -134,10 +190,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         LOGGER.error("Could not load the model: %s", error)
         return 1
 
+    diarization_pipeline = None
+    if args.diarize:
+        LOGGER.info(
+            "Loading diarization model %s on %s",
+            args.diarization_model,
+            args.diarization_device,
+        )
+        try:
+            diarization_pipeline = load_diarization_pipeline(
+                args.diarization_model,
+                token=args.hf_token,
+                device=args.diarization_device,
+            )
+        except Exception as error:
+            LOGGER.error("Could not load the diarization model: %s", error)
+            return 1
+
     failed = False
     for audio_path in args.audio:
         try:
             result = transcribe_audio(model, audio_path, config)
+            if diarization_pipeline is not None:
+                turns = diarize_audio(
+                    diarization_pipeline,
+                    audio_path,
+                    num_speakers=args.num_speakers,
+                    min_speakers=args.min_speakers,
+                    max_speakers=args.max_speakers,
+                )
+                result.segments = assign_speakers(result.segments, turns)
             paths = write_outputs(
                 result,
                 audio_path,

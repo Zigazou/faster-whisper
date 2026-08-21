@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["faster-whisper>=1.2,<2"]
 
+[project.optional-dependencies]
+diarization = ["pyannote.audio>=4,<5"]
+
 [project.scripts]
 chunked-whisper = "chunked_whisper.cli:main"
 
@@ -18,4 +21,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

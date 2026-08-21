@@ -10,6 +10,8 @@ env/
 bin/
 lib/
 lib64
+include
+share/
 
 # Test, coverage, and type-checker output
 .pytest_cache/
@@ -29,3 +31,4 @@ tests/real
 .idea/
 .vscode/
 .DS_Store
+secret.txt

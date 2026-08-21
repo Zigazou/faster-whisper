@@ -19,6 +19,7 @@ class SegmentResult:
     end: float
     text: str
     words: list[WordResult] = field(default_factory=list)
+    speaker: str | None = None
 
 
 @dataclass
@@ -34,4 +35,3 @@ class TranscriptionResult:
     def text(self) -> str:
         """Return all segment text as a single normalized string."""
         return " ".join(segment.text.strip() for segment in self.segments).strip()
-

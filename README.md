@@ -22,6 +22,13 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
+To enable speaker diarization, ensure the `ffmpeg` executable is installed and
+install the optional pyannote.audio dependencies:
+
+```bash
+python -m pip install -e '.[diarization]'
+```
+
 ## Run
 
 The installation provides the `chunked-whisper` command:
@@ -40,6 +47,35 @@ include word timestamps:
 ```bash
 chunked-whisper recording.wav --language en --word-timestamps
 ```
+
+## Speaker diarization
+
+Accept the conditions for the
+[`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1)
+model, create a Hugging Face access token, and run:
+
+```bash
+HF_TOKEN=hf_... chunked-whisper interview.mp3 --diarize
+```
+
+The token can instead be passed with `--hf-token`. Diarization runs locally
+after the model is downloaded. It assigns anonymous, file-local labels such as
+`SPEAKER_00` and `SPEAKER_01`; it does not identify people. TXT and SRT outputs
+include these labels, and JSON segments gain a `speaker` field. Word timestamps
+are enabled automatically so a Whisper segment can be split when its speaker
+changes.
+
+Speaker count hints can improve results when the number of participants is
+known:
+
+```bash
+chunked-whisper meeting.wav --diarize --num-speakers 3
+chunked-whisper meeting.wav --diarize --min-speakers 2 --max-speakers 5
+```
+
+Diarization defaults to CPU so it does not compete with Whisper for GPU memory.
+Use `--diarization-device cuda` to accelerate it when enough VRAM is available,
+or `--diarization-model /path/to/model` to use a locally stored pipeline.
 
 Write a single output type to a separate directory:
 
@@ -62,6 +98,25 @@ chunked-whisper recording.wav --device cpu --compute-type int8
 ```
 
 Run `chunked-whisper --help` for all options.
+
+## Format speaker turns
+
+To turn diarized TXT output into grouped French speaker labels, run:
+
+```bash
+python format_transcript.py transcript.txt
+```
+
+This writes `transcript.formatted.txt` beside the input. Consecutive lines from
+the same speaker are combined, unlabelled lines inherit the previous speaker,
+and labels such as `SPEAKER_00` and `SPEAKER_01` become `Locuteur A` and
+`Locuteur B`. Several files can be processed together, optionally into another
+directory:
+
+```bash
+python format_transcript.py transcript-1.txt transcript-2.txt \
+  --output-dir formatted
+```
 
 ## Tests
 
