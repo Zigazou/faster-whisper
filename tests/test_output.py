@@ -35,12 +35,16 @@ class OutputTests(unittest.TestCase):
     def test_diarized_text_and_srt_include_speaker(self):
         segments = [
             SegmentResult(0.0, 1.0, "Hello.", speaker="SPEAKER_00"),
-            SegmentResult(1.0, 2.0, "Hi.", speaker="SPEAKER_01"),
+            SegmentResult(1.0, 2.0, "It", speaker="SPEAKER_00"),
+            SegmentResult(2.0, 3.0, "'s me."),
+            SegmentResult(3.0, 4.0, "Hi.", speaker="SPEAKER_01"),
+            SegmentResult(4.0, 5.0, "Welcome.", speaker="SPEAKER_00"),
         ]
 
         self.assertEqual(
             render_txt(segments),
-            "[SPEAKER_00] Hello.\n[SPEAKER_01] Hi.\n",
+            "[Locuteur A] Hello. It's me.\n\n"
+            "[Locuteur B] Hi.\n\n[Locuteur A] Welcome.\n",
         )
         self.assertIn("\n[SPEAKER_01] Hi.\n", render_srt(segments))
 

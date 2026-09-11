@@ -32,3 +32,4 @@ tests/real
 .vscode/
 .DS_Store
 secret.txt
+work/

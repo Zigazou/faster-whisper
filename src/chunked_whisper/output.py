@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from .models import SegmentResult, TranscriptionResult
+from .speaker_formatter import format_speaker_transcript
 
 OutputFormat = Literal["all", "txt", "srt", "json"]
 
@@ -26,14 +27,14 @@ def _speaker_prefix(segment: SegmentResult) -> str:
 
 
 def render_txt(segments: Sequence[SegmentResult]) -> str:
-    """Render plain text, adding one line per diarized speaker turn.
+    """Render plain text, grouping diarized segments by speaker.
 
     Args:
         segments: Sequence of transcript segments to render.
 
     Returns:
-        Plain-text output with either one line per segment or a single text
-        block when no speaker labels are present.
+        Plain-text output with grouped turns labelled ``[Locuteur A]``, etc.,
+        or a single text block when no speaker labels are present.
     """
     if any(segment.speaker for segment in segments):
         lines = [
@@ -41,7 +42,7 @@ def render_txt(segments: Sequence[SegmentResult]) -> str:
             for segment in segments
         ]
 
-        return "\n".join(lines) + ("\n" if lines else "")
+        return format_speaker_transcript("\n".join(lines))
 
     text = " ".join(segment.text.strip() for segment in segments).strip()
 

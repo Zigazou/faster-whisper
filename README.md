@@ -60,8 +60,10 @@ HF_TOKEN=hf_... chunked-whisper interview.mp3 --diarize
 
 The token can instead be passed with `--hf-token`. Diarization runs locally
 after the model is downloaded. It assigns anonymous, file-local labels such as
-`SPEAKER_00` and `SPEAKER_01`; it does not identify people. TXT and SRT outputs
-include these labels, and JSON segments gain a `speaker` field. Word timestamps
+`SPEAKER_00` and `SPEAKER_01`; it does not identify people. TXT output groups
+consecutive turns with labels such as `[Locuteur A]` and `[Locuteur B]`,
+separated by blank lines. SRT keeps the original labels, and JSON segments
+gain a `speaker` field. Word timestamps
 are enabled automatically so a Whisper segment can be split when its speaker
 changes.
 
@@ -101,7 +103,12 @@ Run `chunked-whisper --help` for all options.
 
 ## Format speaker turns
 
-To turn diarized TXT output into grouped French speaker labels, run:
+With `--diarize`, TXT output is formatted automatically, both for
+`--output-format txt` and the default `--output-format all`. Consecutive lines
+from the same speaker are combined, and unlabelled lines inherit the previous
+speaker.
+
+To apply the same formatting to older raw diarized TXT files, run:
 
 ```bash
 python format_transcript.py transcript.txt
