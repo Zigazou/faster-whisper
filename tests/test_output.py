@@ -32,6 +32,17 @@ class OutputTests(unittest.TestCase):
             "1\n00:00:00,000 --> 00:00:01,250\nHello world.\n",
         )
 
+    def test_srt_ensures_positive_duration_without_mutating_segments(self):
+        for start, end in [(3.18, 3.18), (3.1801, 3.1802), (3.18, 3.0)]:
+            with self.subTest(start=start, end=end):
+                segment = SegmentResult(start, end, "'est")
+
+                self.assertEqual(
+                    render_srt([segment]),
+                    "1\n00:00:03,180 --> 00:00:03,181\n'est\n",
+                )
+                self.assertEqual((segment.start, segment.end), (start, end))
+
     def test_diarized_text_and_srt_include_speaker(self):
         segments = [
             SegmentResult(0.0, 1.0, "Hello.", speaker="SPEAKER_00"),

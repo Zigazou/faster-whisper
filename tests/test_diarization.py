@@ -89,6 +89,47 @@ class DiarizeAudioTests(unittest.TestCase):
 
         self.assertEqual(aligned[0].speaker, "SPEAKER_01")
 
+    def test_zero_duration_contraction_stays_with_previous_word(self):
+        words = [
+            WordResult(2.8, 3.18, " Ce n", 0.9),
+            WordResult(3.18, 3.18, "'est", 0.9),
+            WordResult(3.18, 4.0, " vrai.", 0.9),
+        ]
+        segments = [SegmentResult(2.8, 4.0, "Ce n'est vrai.", words)]
+        turns = [
+            SpeakerTurn(2.8, 3.18, "SPEAKER_00"),
+            SpeakerTurn(3.18, 4.0, "SPEAKER_01"),
+        ]
+
+        aligned = assign_speakers(segments, turns)
+
+        self.assertEqual(
+            [(s.start, s.end, s.speaker, s.text) for s in aligned],
+            [
+                (2.8, 3.18, "SPEAKER_00", "Ce n'est"),
+                (3.18, 4.0, "SPEAKER_01", "vrai."),
+            ],
+        )
+        self.assertEqual(aligned[0].words, words[:2])
+
+    def test_leading_zero_duration_tokens_use_following_word(self):
+        words = [
+            WordResult(0.0, 0.0, " (", 0.9),
+            WordResult(0.0, 0.0, "'", 0.9),
+            WordResult(0.0, 1.0, "Hello", 0.9),
+            WordResult(1.0, 1.0, ")", 0.9),
+        ]
+
+        aligned = assign_speakers(
+            [SegmentResult(0.0, 1.0, "('Hello)", words)],
+            [SpeakerTurn(0.0, 1.0, "SPEAKER_00")],
+        )
+
+        self.assertEqual(len(aligned), 1)
+        self.assertEqual(aligned[0].text, "('Hello)")
+        self.assertEqual(aligned[0].speaker, "SPEAKER_00")
+        self.assertEqual(aligned[0].words, words)
+
 
 if __name__ == "__main__":
     unittest.main()

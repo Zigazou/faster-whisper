@@ -77,16 +77,18 @@ def render_srt(segments: Sequence[SegmentResult]) -> str:
         segments: Sequence of segments to convert to SRT blocks.
 
     Returns:
-        A complete SRT document with one block per segment.
+        A complete SRT document with one block per segment. Each block lasts
+        at least one millisecond, including after timestamp rounding.
     """
-    blocks = [
-        (
-            f"{index}\n{format_timestamp(segment.start)} --> "
-            f"{format_timestamp(segment.end)}\n"
+    blocks = []
+    for index, segment in enumerate(segments, start=1):
+        start_ms = max(0, round(segment.start * 1000))
+        end_ms = max(start_ms + 1, round(segment.end * 1000))
+        blocks.append(
+            f"{index}\n{format_timestamp(start_ms / 1000)} --> "
+            f"{format_timestamp(end_ms / 1000)}\n"
             f"{_speaker_prefix(segment)}{segment.text}"
         )
-        for index, segment in enumerate(segments, start=1)
-    ]
     return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 

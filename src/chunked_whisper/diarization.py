@@ -225,10 +225,26 @@ def assign_speakers(
 
             continue
 
+        # A zero-duration token has no overlap with any speaker turn. Keep it
+        # with the preceding timed word, or the following one at segment start,
+        # so contractions and punctuation do not become separate segments.
+        speakers = [
+            _speaker_for_interval(word.start, word.end, turns)
+            for word in segment.words
+        ]
+        next_speaker: str | None = None
+        for index in range(len(segment.words) - 1, -1, -1):
+            word = segment.words[index]
+            if word.end > word.start:
+                next_speaker = speakers[index]
+            else:
+                speakers[index] = next_speaker
+
         group_words = []
         group_speaker: str | None = None
-        for word in segment.words:
-            speaker = _speaker_for_interval(word.start, word.end, turns)
+        for word, speaker in zip(segment.words, speakers):
+            if word.end <= word.start and group_words:
+                speaker = group_speaker
 
             if group_words and speaker != group_speaker:
                 aligned.append(
