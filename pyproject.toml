@@ -12,6 +12,7 @@ dependencies = ["faster-whisper>=1.2,<2"]
 
 [project.optional-dependencies]
 diarization = ["pyannote.audio>=4,<5"]
+alignment = ["whisperx>=3.8,<4"]
 
 [project.scripts]
 chunked-whisper = "chunked_whisper.cli:main"

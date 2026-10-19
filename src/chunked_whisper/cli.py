@@ -11,6 +11,7 @@ from typing import cast
 
 from faster_whisper import WhisperModel
 
+from .alignment import WordAligner
 from .diarization import (
     DEFAULT_DIARIZATION_MODEL,
     assign_speakers,
@@ -191,6 +192,19 @@ def build_parser() -> ArgumentParser:
         help="Hugging Face token for the gated diarization model",
     )
 
+    parser.add_argument(
+        "--align-words", action="store_true",
+        help="refine word timings with WhisperX before assigning speakers",
+    )
+    parser.add_argument(
+        "--alignment-device", default="cpu",
+        help="PyTorch device for word alignment (default: cpu)",
+    )
+    parser.add_argument(
+        "--alignment-model",
+        help="alignment model name (default: select by transcript language)",
+    )
+
     speaker_group = parser.add_argument_group("speaker count hints")
 
     speaker_group.add_argument(
@@ -256,7 +270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         word_timestamps=args.word_timestamps,
     )
 
-    if args.diarize:
+    if args.diarize or args.align_words:
         config = replace(config, word_timestamps=True)
 
     try:
@@ -320,10 +334,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             LOGGER.error("Could not load the diarization model: %s", error)
             return 1
 
+    aligner = (
+        WordAligner(device=args.alignment_device, model_name=args.alignment_model)
+        if args.align_words else None
+    )
     failed = False
     for audio_path in args.audio:
         try:
             result = transcribe_audio(model, audio_path, config)
+
+            if aligner is not None:
+                result.segments = aligner.align(
+                    result.segments, audio_path, result.language
+                )
 
             if diarization_pipeline is not None:
                 turns = diarize_audio(

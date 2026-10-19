@@ -101,6 +101,39 @@ chunked-whisper recording.wav --device cpu --compute-type int8
 
 Run `chunked-whisper --help` for all options.
 
+## Refine word timings before diarization
+
+Install the optional WhisperX alignment dependency:
+
+```bash
+python -m pip install -e '.[diarization,alignment]'
+```
+
+Then enable forced alignment:
+
+```bash
+chunked-whisper interview.mp3 --diarize --align-words --language fr
+```
+
+Faster Whisper still produces the transcript. WhisperX aligns its text to the
+original audio before words are assigned to pyannote speakers. This can reduce
+misattributed words at speaker changes when Whisper's word timings are inaccurate;
+it does not correct inaccurate speaker boundaries from pyannote.
+
+Alignment defaults to CPU. Use `--alignment-device cuda` to run it on the GPU,
+or `--alignment-model NAME` to override the model selected for the detected or
+specified language. Models are downloaded on first use and reused across files
+with the same language. `--align-words` also works without `--diarize`.
+
+WhisperX adds PyTorch/TorchAudio version constraints; installing the extra may
+replace existing versions. It also downloads language models and may download
+NLTK sentence-tokenizer data. Alignment adds processing time. If any words in a
+segment cannot be aligned, that segment retains its original timings and a warning
+is logged. Text is preserved. Original word confidence is retained when tokenization
+matches; otherwise word probability is set to `0.0` (unavailable), rather than
+substituting an alignment score. Model-loading and processing failures are reported
+as errors rather than silently skipping the requested alignment.
+
 ## Format speaker turns
 
 With `--diarize`, TXT output is formatted automatically, both for

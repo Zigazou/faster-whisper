@@ -74,6 +74,38 @@ class CliTests(unittest.TestCase):
         assign.assert_called_once_with(original_segments, [])
         self.assertEqual(transcription.segments, aligned_segments)
 
+    def test_alignment_runs_before_speaker_assignment(self):
+        result = TranscriptionResult(
+            "recording.wav", "fr", 1.0, 22.0, "large-v3",
+            [SegmentResult(16.98, 22.0, "Le diable")],
+        )
+        refined = [SegmentResult(17.5, 22.0, "Le diable")]
+        with tempfile.TemporaryDirectory() as directory:
+            audio = Path(directory) / "recording.wav"
+            audio.touch()
+            with (
+                patch("chunked_whisper.cli.WhisperModel"),
+                patch("chunked_whisper.cli.load_diarization_pipeline"),
+                patch("chunked_whisper.cli.transcribe_audio", return_value=result) as transcribe,
+                patch("chunked_whisper.cli.WordAligner") as aligner,
+                patch("chunked_whisper.cli.diarize_audio", return_value=[]) as diarize,
+                patch("chunked_whisper.cli.assign_speakers", return_value=refined) as assign,
+                patch("chunked_whisper.cli.write_outputs", return_value=[]) as write,
+            ):
+                original = result.segments
+                aligner.return_value.align.return_value = refined
+                def check_aligned(*args, **kwargs):
+                    self.assertIs(result.segments, refined)
+                    return []
+                diarize.side_effect = check_aligned
+                code = main([str(audio), "--diarize", "--align-words", "--language", "fr"])
+        self.assertEqual(code, 0)
+        self.assertTrue(transcribe.call_args.args[2].word_timestamps)
+        aligner.assert_called_once_with(device="cpu", model_name=None)
+        aligner.return_value.align.assert_called_once_with(original, audio, "fr")
+        assign.assert_called_once_with(refined, [])
+        write.assert_called_once()
+
     def test_rejects_conflicting_speaker_count_options(self):
         with tempfile.TemporaryDirectory() as directory:
             audio_path = Path(directory) / "recording.wav"
